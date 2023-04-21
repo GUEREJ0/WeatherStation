@@ -1,0 +1,83 @@
+// Luis de Santos - Outdoor Unit
+// Sources:
+// https://nrf24.github.io/RF24/ (used for RF24 library and understanding pinout)
+// https://howtomechatronics.com/tutorials/arduino/arduino-wireless-communication-nrf24l01-tutorial/ (starter code taken from this site to get transievers working)
+// https://www.circuitbasics.com/arduino-7-segment-display-tutorial/ (used to get 4 digit 7 segment display working)
+
+
+#include <stdio.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include <dht_nonblocking.h>
+#include "SevSeg.h"
+#define DHT_SENSOR_TYPE DHT_TYPE_22
+
+SevSeg sevseg;
+
+static const int DHT_SENSOR_PIN = 3;
+DHT_nonblocking dht_sensor(DHT_SENSOR_PIN, DHT_SENSOR_TYPE);
+
+RF24 radio(7, 8); // CE, CSN
+
+const byte address[6] = "00001";
+
+unsigned long timeSinceLast = 0;
+
+// Function taken from dht_nonblocking library example
+// This function was provided as example code in the ELEGOO starter material
+static bool measure_environment(float *temperature, float *humidity) {
+  static unsigned long measurement_timestamp = millis();
+
+  // Updates every four seconds
+  if(millis() - measurement_timestamp > 3000ul) {
+    if(dht_sensor.measure(temperature, humidity) == true) {
+      measurement_timestamp = millis( );
+      return(true);
+    }
+  }
+  return(false);
+}
+
+void setup() {
+  // 4 digit 7 segment display setup
+  byte numDigits = 4;
+  byte digitPins[] = {A3, A2, A1, A0};
+  byte segmentPins[] = {10, 2, 4, A5, A4, 9, 6, 5};
+
+  bool resistorsOnSegments = true; 
+  bool updateWithDelaysIn = true;
+  byte hardwareConfig = COMMON_CATHODE;
+  sevseg.begin(hardwareConfig, numDigits, digitPins, segmentPins, resistorsOnSegments);
+  sevseg.setBrightness(90);
+
+  // Radio setup
+  Serial.begin(9600);
+  radio.begin();
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_MIN);
+  radio.stopListening();
+}
+
+void loop() {
+  float temperature;
+  float humidity;
+  char myChar[20];
+
+  if(measure_environment(&temperature, &humidity) == true) {
+    // Converts float to string as required to send via wireless
+    dtostrf(temperature, 4, 2, myChar);
+  }
+
+  // Sends a new update to the indoor unit at a given interval of 5 seconds
+  if (millis() - timeSinceLast > 5000) {
+    Serial.println(myChar);
+    radio.write(&myChar, sizeof(myChar));
+    timeSinceLast = millis();
+    
+    // Updates display with new temp value from sensor
+    sevseg.setNumberF(temperature, 2);
+  }
+
+  sevseg.refreshDisplay();
+}
